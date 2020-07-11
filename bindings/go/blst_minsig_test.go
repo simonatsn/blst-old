@@ -269,50 +269,45 @@ func TestSignVerifyAggregateMinSig(t *testing.T) {
     }
 }
 
-func TestSignMultipleVerifyAggregateMinSig(t *testing.T) {
+func generateMultipleVerifyAggregateDataMinSig(size int) ([]*SignatureMinSig,
+    [][]*PublicKeyMinSig, [][]Message) {
+    // Number of messages per aggregated signature
     msgCount := 5
-    for size := 1; size < 20; size++ {
-        msgs := make([]Message, 0)
-        sks := make([]*SecretKey, 0)
-        pks := make([]*PublicKeyMinSig, 0)
 
-        // Generate messages
-        for i := 0; i < msgCount; i++ {
-            msg := Message(fmt.Sprintf("blst is a blast!! %d %d", i, size))
-            msgs = append(msgs, msg)
+    aggSigs := make([]*SignatureMinSig, 0)
+    aggPks := make([][]*PublicKeyMinSig, 0)
+    aggMsgs := make([][]Message, 0)
+
+    for i := 0; i < size; i++ {
+        // Generate an aggregate signature
+        _, msgs, _, pks, agSig, err :=
+            generateBatchTestDataUncompressedMinSig(msgCount + i)
+        if err {
+            fmt.Printf(
+                "generateBatchTestDataUncompressedMinSig returned error\n");
+            return nil, nil, nil
         }
 
-        // Generate keypairs
-        for i := 0; i < size; i++ {
-            priv := genRandomKeyMinSig()
-            sks = append(sks, priv)
-            pks = append(pks, new(PublicKeyMinSig).From(priv))
+        // Verify aggregated signature and pk
+        if !agSig.AggregateVerify(pks, msgs, dstMinSig) {
+            fmt.Printf("failed to verify single aggregate size %d\n", size)
+            return nil, nil, nil
         }
 
-        // All signers sign each message
-        aggSigs := make([]*SignatureMinSig, 0)
-        aggPks := make([]*PublicKeyMinSig, 0)
-        for i := 0; i < msgCount; i++ {
-            sigsToAgg := make([]*SignatureMinSig, 0)
-            pksToAgg := make([]*PublicKeyMinSig, 0)
-            for j := 0; j < size; j++ {
-                sigsToAgg = append(sigsToAgg, new(SignatureMinSig).Sign(sks[j],
-                    msgs[i], dstMinSig))
-                pksToAgg = append(pksToAgg, pks[j])
-            }
+        aggSigs = append(aggSigs, agSig)
+        aggPks = append(aggPks, pks)
+        aggMsgs = append(aggMsgs, msgs)
+    }
+    return aggSigs, aggPks, aggMsgs
+}
 
-            agSig := new(AggregateSignatureMinSig).Aggregate(sigsToAgg).ToAffine()
-            agPk := new(AggregatePublicKeyMinSig).Aggregate(pksToAgg).ToAffine()
-            aggSigs = append(aggSigs, agSig)
-            aggPks = append(aggPks, agPk)
-
-            // Verify aggregated signature and pk
-            if !agSig.Verify(agPk, msgs[i], dstMinSig) {
-                t.Errorf("failed to verify single aggregate size %d", size)
-            }
-
+func TestSignMultipleVerifyAggregateMinSig(t *testing.T) {
+    for size := 2; size < 5; size++ {
+        aggSigs, aggPks, msgs := generateMultipleVerifyAggregateDataMinSig(size)
+        if aggSigs == nil {
+            t.Errorf("Failed to generateMultipleVerifyAggregateData")
         }
-
+        
         randFn := func(s *Scalar) {
             var rbytes [BLST_SCALAR_BYTES]byte
             mrand.Read(rbytes[:])
@@ -326,11 +321,56 @@ func TestSignMultipleVerifyAggregateMinSig(t *testing.T) {
             t.Errorf("failed to verify multiple aggregate size %d", size)
         }
 
-        // Negative test
+        // Negative test - swap two signatures
+        aggSigs[0], aggSigs[1] = aggSigs[1], aggSigs[0]
         if new(SignatureMinSig).MultipleAggregateVerify(aggSigs, aggPks, msgs,
-            dstMinSig[1:], randFn, randBits) {
+            dstMinSig, randFn, randBits) {
             t.Errorf("failed to not verify multiple aggregate size %d", size)
         }
+    }
+}
+
+
+func BenchmarkSignMultipleVerifyAggregateMinSig(b *testing.B) {
+    for size := 10; size <= 10 ; size++ {
+        aggSigs, aggPks, msgs := generateMultipleVerifyAggregateDataMinSig(size)
+        if aggSigs == nil {
+            b.Fatal("generateMultipleVerifyAggregateData")
+        }
+        
+        randFn := func(s *Scalar) {
+            var rbytes [BLST_SCALAR_BYTES]byte
+            mrand.Read(rbytes[:])
+            s.FromBEndian(rbytes[:])
+        }
+
+        // Compare individual AggregateVerify vs MultipleAggregateVerify
+
+        // Individual
+        b.Run("MultipleAggregateVerifySingleMinSig", func(b *testing.B) {
+            b.ReportAllocs()
+            for i := 0; i < b.N; i++ {
+                for j := 0; j < len(aggSigs); j++ {
+                    // Verify aggregated signature and pk
+                    if !aggSigs[j].AggregateVerify(aggPks[j],
+                        msgs[j], dstMinSig) {
+                        b.Fatal("AggregateVerify")
+                    }
+                }
+            }        
+        })
+            
+        // Multiple
+        b.Run("MultipleAggregateVerifyMinSig", func(b *testing.B) {
+            b.ReportAllocs()
+            randBits := 64
+            for i := 0; i < b.N; i++ {
+                if !new(SignatureMinSig).MultipleAggregateVerify(aggSigs, aggPks,
+                    msgs, dstMinSig, randFn, randBits) {
+                    b.Fatal("MultipleAggregateVerify")
+                }
+            }
+        })
     }
 }
 

@@ -154,10 +154,12 @@ func PairingMulNAggregatePkInG1(ctx Pairing, PK *P1Affine, sig *P2Affine,
     }
 
     var hash *P2Affine
-    if useHash {
-        hash = HashToG2(msg, dst, aug).ToAffine()
-    } else {
-        hash = EncodeToG2(msg, dst, aug).ToAffine()
+    if msg != nil {
+        if useHash {
+            hash = HashToG2(msg, dst, aug).ToAffine()
+        } else {
+            hash = EncodeToG2(msg, dst, aug).ToAffine()
+        }
     }
 
     r := C.blst_pairing_mul_n_aggregate_pk_in_g1((*C.blst_pairing)(&ctx[0]),
@@ -181,10 +183,12 @@ func PairingMulNAggregatePkInG2(ctx Pairing, PK *P2Affine, sig *P1Affine,
     }
 
     var hash *P1Affine
-    if useHash {
-        hash = HashToG1(msg, dst, aug).ToAffine()
-    } else {
-        hash = EncodeToG1(msg, dst, aug).ToAffine()
+    if msg != nil {
+        if useHash {
+            hash = HashToG1(msg, dst, aug).ToAffine()
+        } else {
+            hash = EncodeToG1(msg, dst, aug).ToAffine()
+        }
     }
 
     r := C.blst_pairing_mul_n_aggregate_pk_in_g2((*C.blst_pairing)(&ctx[0]),
