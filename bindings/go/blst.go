@@ -334,6 +334,54 @@ func (sig *P2Affine) AggregateVerify(pks []*P1Affine, msgs []Message,
 	return coreAggregateVerifyPkInG1(sigFn, pkFn, msgs, dst, useHash)
 }
 
+// Aggregate verify with uncompressed signature and public keys
+func (dummy *P2Affine) MultipleVerifySimple(sigs []*P2Affine, pks []*P1Affine,
+	msgs []Message, dst []byte, randFn func(*Scalar), randBits int,
+	optional ...interface{}) bool { // useHash bool, augs [][]byte
+
+	// sanity checks and argument parsing
+	if len(pks) != len(msgs) {
+		return false
+	}
+	_, augs, useHash, ok := parseOpts(optional...)
+	useAugs := len(augs) != 0
+	if !ok || (useAugs && len(augs) != len(msgs)) {
+		return false
+	}
+
+	rands := make([]Scalar, len(sigs))
+	multiSigs := make([]*P2Affine, len(sigs))
+	for i := 0; i < len(sigs); i++ {
+		randFn(&rands[i])
+
+		var p2 P2
+		C.blst_p2_from_affine(&p2, sigs[i])
+		C.blst_p2_mult_w5(&p2, &p2, &rands[i], C.size_t(randBits))
+		multiSigs[i] = new(P2Affine)
+		C.blst_p2_to_affine(multiSigs[i], &p2)
+	}
+	agSig := new(P2Aggregate).Aggregate(multiSigs).ToAffine()
+
+	sigFn := func() *P2Affine {
+		return agSig
+	}
+
+	pkFn := func(i uint32, p1Aff *P1Affine) (*P1Affine, []byte) {
+		var p1 P1
+		C.blst_p1_from_affine(&p1, pks[i])
+		C.blst_p1_mult_w5(&p1, &p1, &rands[i], C.size_t(randBits))
+		C.blst_p1_to_affine(p1Aff, &p1)
+
+		if useAugs {
+			return p1Aff, augs[i]
+		} else {
+			return p1Aff, nil
+		}
+	}
+
+	return coreAggregateVerifyPkInG1(sigFn, pkFn, msgs, dst, useHash)
+}
+
 // Aggregate verify with compressed signature and public keys
 // Uses a dummy signature to get the correct type
 func (dummy *P2Affine) AggregateVerifyCompressed(sig []byte, pks [][]byte,
@@ -546,6 +594,7 @@ type mulAggGetterPkInG1 func(work uint32, sig *P2Affine, pk *P1Affine,
 
 func multipleAggregateVerifyPkInG1(paramsFn mulAggGetterPkInG1, msgs []Message,
 	dst []byte, randBits int, optional ...bool) bool { // useHash
+
 	n := len(msgs)
 	if n == 0 {
 		return true
@@ -899,6 +948,54 @@ func (sig *P1Affine) AggregateVerify(pks []*P2Affine, msgs []Message,
 	return coreAggregateVerifyPkInG2(sigFn, pkFn, msgs, dst, useHash)
 }
 
+// Aggregate verify with uncompressed signature and public keys
+func (dummy *P1Affine) MultipleVerifySimple(sigs []*P1Affine, pks []*P2Affine,
+	msgs []Message, dst []byte, randFn func(*Scalar), randBits int,
+	optional ...interface{}) bool { // useHash bool, augs [][]byte
+
+	// sanity checks and argument parsing
+	if len(pks) != len(msgs) {
+		return false
+	}
+	_, augs, useHash, ok := parseOpts(optional...)
+	useAugs := len(augs) != 0
+	if !ok || (useAugs && len(augs) != len(msgs)) {
+		return false
+	}
+
+	rands := make([]Scalar, len(sigs))
+	multiSigs := make([]*P1Affine, len(sigs))
+	for i := 0; i < len(sigs); i++ {
+		randFn(&rands[i])
+
+		var p1 P1
+		C.blst_p1_from_affine(&p1, sigs[i])
+		C.blst_p1_mult_w5(&p1, &p1, &rands[i], C.size_t(randBits))
+		multiSigs[i] = new(P1Affine)
+		C.blst_p1_to_affine(multiSigs[i], &p1)
+	}
+	agSig := new(P1Aggregate).Aggregate(multiSigs).ToAffine()
+
+	sigFn := func() *P1Affine {
+		return agSig
+	}
+
+	pkFn := func(i uint32, p2Aff *P2Affine) (*P2Affine, []byte) {
+		var p2 P2
+		C.blst_p2_from_affine(&p2, pks[i])
+		C.blst_p2_mult_w5(&p2, &p2, &rands[i], C.size_t(randBits))
+		C.blst_p2_to_affine(p2Aff, &p2)
+
+		if useAugs {
+			return p2Aff, augs[i]
+		} else {
+			return p2Aff, nil
+		}
+	}
+
+	return coreAggregateVerifyPkInG2(sigFn, pkFn, msgs, dst, useHash)
+}
+
 // Aggregate verify with compressed signature and public keys
 // Uses a dummy signature to get the correct type
 func (dummy *P1Affine) AggregateVerifyCompressed(sig []byte, pks [][]byte,
@@ -1111,6 +1208,7 @@ type mulAggGetterPkInG2 func(work uint32, sig *P1Affine, pk *P2Affine,
 
 func multipleAggregateVerifyPkInG2(paramsFn mulAggGetterPkInG2, msgs []Message,
 	dst []byte, randBits int, optional ...bool) bool { // useHash
+
 	n := len(msgs)
 	if n == 0 {
 		return true
